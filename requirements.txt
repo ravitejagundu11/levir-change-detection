@@ -1,8 +1,0 @@
-# Extras on top of Colab's preinstalled torch/torchvision. Keep versions exact.
-# If Colab already ships a different version of one of these, prefer matching Colab's
-# version (check with `!pip list`) to avoid a forced runtime restart.
-numpy==2.0.2
-pillow==11.1.0
-PyYAML==6.0.2
-matplotlib==3.10.0
-pytest==8.3.5
