@@ -1,0 +1,25 @@
+# Data, checkpoints and run outputs live on Google Drive, never in git
+data/
+checkpoints/
+outputs/
+runs/
+workspace/
+*.pt
+*.pth
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Notebooks / editors / OS
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
