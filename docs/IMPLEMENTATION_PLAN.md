@@ -15,7 +15,8 @@ Given two co-registered images of the same area taken at different times, predic
 - Metrics: precision, recall, F1/Dice and IoU for the change class. These come from confusion counts summed over the whole test set. Qualitative success and failure examples go alongside them.
 - Compute: Google Colab only, with the dataset stored on Google Drive. Nothing is run on the local Mac.
 - Deliverable format: one self-contained notebook, `levir_change_detection.ipynb`, uploaded to Colab and run there. No package, no pip installs, no repo clone.
-- Scope: core work only. No robustness experiment, no SpaceNet 7.
+- Scope (revised after midterm feedback): finish the Siamese U-Net, then compare all methods under test-time brightness changes and image misalignment. Focus on comparison and interpretation; no new models (the `concat` Siamese variant and SpaceNet 7 are dropped).
+- Midterm feedback: "Prioritize completing the Siamese U-Net experiments and comparing model robustness under brightness changes and image misalignment. Focus on meaningful comparisons and interpretation rather than adding more models."
 - Team split (assumed, can be changed):
   - Raviteja: data, EDA, metrics, baseline and evaluation.
   - Joel: training infrastructure and the two U-Nets.
@@ -29,7 +30,7 @@ Given two co-registered images of the same area taken at different times, predic
 - Each 1024×1024 image is cut into 16 non-overlapping 256×256 tiles once and saved to Drive as a zip. Each session copies the zip to the VM's local disk, because reading thousands of small files from Drive is slow. That gives 7,120 training tiles and fits T4 memory. Because the tiles don't overlap, metrics summed over all test tiles equal metrics over the full images.
 - Imbalance handling: the loss is BCE plus Dice. The baseline threshold and the model decision threshold are tuned on val, never on test.
 - Augmentation: random flips and 90° rotations, applied identically to A, B and the label. Normalization uses per-channel mean and std computed from the training set during EDA.
-- Both U-Nets use the same channel widths (32→64→128→256→512) so the comparison is fair, and parameter counts are reported. Siam-U-Net fusion is a config option: `diff` is the primary run (|f_A − f_B|, as in FC-Siam-diff) and `concat` is an optional extra run.
+- Both U-Nets use the same channel widths (32→64→128→256→512) so the comparison is fair, and parameter counts are reported. Siam-U-Net uses `diff` fusion (|f_A − f_B| at every level, as in FC-Siam-diff). The code supports `concat`, but it is not trained.
 - Colab constraints are sessions of 12 hours or less and possible disconnects. To cope, a checkpoint is saved to Drive every epoch (model, optimizer, scheduler, epoch number, best F1), and runs resume automatically. Mixed-precision training (AMP) is on. Logs are CSV files, with no external tracking service.
 - Dependencies: only what Colab preinstalls (torch, torchvision, numpy, pillow, matplotlib). Nothing is installed.
 - Testing: no unit tests. Each task is checked by running its section in Colab and checking the demo output.
@@ -109,7 +110,7 @@ Code is written locally but never run locally (no Python, pip or notebooks on th
   - Figures are saved to `results/figures/` for the report.
 - Demo: the imbalance statistics and figures, plus a `stats.json` the dataset reads.
 
-### - [ ] Task 5: Image-difference baseline (Raviteja)
+### - [x] Task 5: Image-difference baseline (Raviteja)
 - Objective: the first benchmark numbers.
 - Guidance:
   - Per-pixel L2 norm of |A − B| across channels, with optional Gaussian smoothing, then a threshold.
@@ -117,7 +118,7 @@ Code is written locally but never run locally (no Python, pip or notebooks on th
   - Settings come from `CONFIG["baseline"]`. Results go to `results/baseline.json` plus overlay images.
 - Demo: baseline P/R/F1/IoU on the test set, with sample overlays.
 
-### - [ ] Task 6: Training infrastructure (Joel)
+### - [x] Task 6: Training infrastructure (Joel)
 - Objective: a training loop that works with any model, can be resumed, and has been checked on a stand-in model.
 - Guidance:
   - BCE plus Dice loss (both weights configurable).
@@ -127,7 +128,7 @@ Code is written locally but never run locally (no Python, pip or notebooks on th
   - A `RUN` flag per training run controls whether it executes on "Run all".
 - Demo: a short `DummyCD` run on real tiles shows the loss dropping. After an interrupt and restart, it resumes from the checkpoint.
 
-### - [ ] Task 7: U-Net-EF model (Joel)
+### - [x] Task 7: U-Net-EF model (Joel)
 - Objective: the first neural model, trained.
 - Guidance:
   - Shared building blocks: DoubleConv (conv, batch norm, ReLU, twice), Down, Up (transposed conv plus skip concat) and OutConv.
@@ -136,7 +137,7 @@ Code is written locally but never run locally (no Python, pip or notebooks on th
   - Train it on Colab over as many sessions as needed. Each Run all trains for at most `CONFIG["session_minutes"]` (150), saves, then continues to evaluation; the next session resumes.
 - Demo: training curves (from the CSV), plus the best val F1 and IoU.
 
-### - [ ] Task 8: Evaluation and first comparison (Raviteja). Milestone: Midway Report
+### - [x] Task 8: Evaluation and first comparison (Raviteja). Milestone: Midway Report
 - Objective: a single evaluation path for every method.
 - Guidance:
   - Load a checkpoint and tune the decision threshold on val (default 0.5 if not tuned). Then run on the test tiles and compute global and per-image metrics, writing them to `results/{run}.json` and `results/{run}_per_image.csv`. Finally stitch tiles back into full 1024×1024 predictions.
@@ -144,25 +145,33 @@ Code is written locally but never run locally (no Python, pip or notebooks on th
   - A comparison table built from all the results JSON files (baseline and U-Net-EF for now).
 - Demo: a test-set table comparing the baseline and U-Net-EF, with overlays. This is the content for the Midway Report.
 
-### - [ ] Task 9: Siamese U-Net (Joel)
-- Objective: the late-fusion model, trained and evaluated.
+### - [ ] Task 9: Siamese U-Net (Joel). Priority 1 from feedback
+- Objective: the late-fusion model, trained and evaluated exactly like U-Net-EF.
 - Guidance:
-  - A shared `Encoder` returning skips s1–s5. Each level is fused as `diff` (|a − b|, same channel count) or `concat` (doubled channels, with matching decoder input widths). The decoder reuses the Task 7 blocks.
-  - Register it and add `CONFIG["siam_unet_diff"]`, plus `CONFIG["siam_unet_concat"]` as an optional run.
-  - Train it, then evaluate it with Task 8's code.
-- Demo: Siam-U-Net added to the comparison table, with overlays.
+  - The shared Task 7 `UNetEncoder` (3 input channels) runs on A and B in one batched call. Each level's features are fused as |f_A − f_B| and passed to the Task 7 `UNetDecoder`. Same widths, so the parameter count matches U-Net-EF almost exactly.
+  - `CONFIG["runs"]["siam_unet_diff"]`: same training settings as U-Net-EF (batch 16, lr 1e-3, 150 epochs). Expect about 1.5× U-Net-EF's training time, since the encoder runs twice.
+  - Evaluate with Task 8's `evaluate_run` and add it to the comparison table.
+- Demo: model check (shape, parameters, output unchanged when A and B are swapped), training curves next to U-Net-EF, Siam-U-Net in the comparison table, overlays.
 
-### - [ ] Task 10: Final analysis and report assets (Raviteja leads, Joel reviews)
-- Objective: the material behind the report's conclusions.
+### - [ ] Task 10: Robustness to brightness change and misalignment (Raviteja). Priority 2 from feedback
+- Objective: show how each method degrades when the test images break the assumptions of clean, co-registered pairs.
 - Guidance:
-  - The analysis section covers:
-    - the final table (P/R/F1/IoU, parameter count, training time)
-    - training curves for all models
-    - per-image F1 distributions
-    - F1 by changed-area bucket (small, medium, large)
-    - the best and worst examples for each model
-    - a manually tagged set of failure categories, such as small buildings, shadows and seasonal or lighting change, misregistration, and construction sites
-  - All figures are exported to `results/figures/` for the presentation and report.
+  - Perturb only the post-change image B, at test time; A and the labels are untouched. Thresholds stay at their clean-val values (no retuning), as in deployment.
+    - Brightness: B × gain, clipped to [0, 1], gain ∈ {0.6, 0.8, 1.0, 1.2, 1.4}.
+    - Misalignment: B shifted right and down by s ∈ {0, 1, 2, 4, 8, 16} px (up to 8 m per axis), with edge replication.
+  - Work on full 1024×1024 images, split into the usual 16 tiles for the models, so shifts don't create tile-border artifacts. A 16-px border is excluded from metrics in every condition, so all conditions score the same pixels.
+  - Methods: baseline `raw` (selected) and `matched_smooth` (per-tile standardization makes it invariant to gain by design, which is a useful reference), U-Net-EF, Siam-U-Net.
+  - Outputs: `results/robustness.json`, `robustness.csv`, `robustness_per_image.csv` (per-image counts for Task 11's confidence intervals), F1-vs-perturbation plots and qualitative overlays.
+- Demo: clean-condition F1 matches Task 5/8, the F1 table and curves, and overlays for one image under brightness 0.6 and an 8-px shift.
+
+### - [ ] Task 11: Final analysis and report assets (Raviteja leads, Joel reviews)
+- Objective: the comparisons and interpretation behind the report's conclusions.
+- Guidance:
+  - Final table (P/R/F1/IoU, parameters, training time) with bootstrap 95% confidence intervals over the 128 test images, and paired bootstrap intervals for U-Net-EF vs Siam-U-Net, clean and under each perturbation. This shows which differences are real.
+  - Robustness interpretation: relative F1 drop per method; where errors appear under shift (building edges) and brightness (false alarms vs misses).
+  - Training curves for both U-Nets; per-image F1 distributions; F1 by changed-area bucket (small, medium, large); best and worst examples.
+  - A manually tagged set of failure categories (small buildings, shadows, seasonal or lighting change, misregistration, construction sites).
+  - All figures exported to `results/figures/` for the presentation and report.
 - Demo: one section that produces every table and figure for the final report.
 
 ## Open Questions
